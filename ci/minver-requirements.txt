@@ -20,4 +20,4 @@ python-dateutil==2.7
 # ipython/matplotlib-inline versions from before the transition.
 ipython==7.29.0
 ipykernel==5.5.6
-matplotlib-inline<0.1.7
+matplotlib-inline<0.2.3
