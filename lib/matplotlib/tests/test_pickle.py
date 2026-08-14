@@ -1,5 +1,6 @@
 from io import BytesIO
 import ast
+import os
 import pickle
 import pickletools
 
@@ -8,14 +9,14 @@ import pytest
 
 import matplotlib as mpl
 from matplotlib import cm
-from matplotlib.testing import subprocess_run_helper
+from matplotlib.testing import subprocess_run_helper, is_ci_environment
 from matplotlib.testing.decorators import check_figures_equal
-from matplotlib.dates import rrulewrapper
+from matplotlib.dates import rrulewrapper  # type: ignore[attr-defined]
 from matplotlib.lines import VertexSelector
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
 import matplotlib.figure as mfigure
-from mpl_toolkits.axes_grid1 import axes_divider, parasite_axes  # type: ignore
+from mpl_toolkits.axes_grid1 import axes_divider, parasite_axes
 
 
 def test_simple():
@@ -93,11 +94,16 @@ def _generate_complete_test_figure(fig_ref):
     plt.errorbar(x, x * -0.5, xerr=0.2, yerr=0.4, label='$-.5 x$')
     plt.legend(draggable=True)
 
+    # Ensure subfigure parenting works.
+    subfigs = fig_ref.subfigures(2)
+    subfigs[0].subplots(1, 2)
+    subfigs[1].subplots(1, 2)
+
     fig_ref.align_ylabels()  # Test handling of _align_label_groups Groupers.
 
 
 @mpl.style.context("default")
-@check_figures_equal(extensions=["png"])
+@check_figures_equal()
 def test_complete(fig_test, fig_ref):
     _generate_complete_test_figure(fig_ref)
     # plotting is done, now test its pickle-ability
@@ -117,7 +123,6 @@ def test_complete(fig_test, fig_ref):
 
 
 def _pickle_load_subprocess():
-    import os
     import pickle
 
     path = os.environ['PICKLE_FILE_PATH']
@@ -129,7 +134,7 @@ def _pickle_load_subprocess():
 
 
 @mpl.style.context("default")
-@check_figures_equal(extensions=['png'])
+@check_figures_equal()
 def test_pickle_load_from_subprocess(fig_test, fig_ref, tmp_path):
     _generate_complete_test_figure(fig_ref)
 
@@ -143,7 +148,7 @@ def test_pickle_load_from_subprocess(fig_test, fig_ref, tmp_path):
     proc = subprocess_run_helper(
         _pickle_load_subprocess,
         timeout=60,
-        extra_env={'PICKLE_FILE_PATH': str(fp), 'MPLBACKEND': 'Agg'}
+        extra_env={"PICKLE_FILE_PATH": str(fp), "MPLBACKEND": "Agg"},
     )
 
     loaded_fig = pickle.loads(ast.literal_eval(proc.stdout))
@@ -302,3 +307,18 @@ def test_cycler():
     ax = pickle.loads(pickle.dumps(ax))
     l, = ax.plot([3, 4])
     assert l.get_color() == "m"
+
+
+# Run under an interactive backend to test that we don't try to pickle the
+# (interactive and non-picklable) canvas.
+def _test_axeswidget_interactive():
+    ax = plt.figure().add_subplot()
+    pickle.dumps(mpl.widgets.Button(ax, "button"))
+
+
+def test_axeswidget_interactive():
+    subprocess_run_helper(
+        _test_axeswidget_interactive,
+        timeout=120 if is_ci_environment() else 20,
+        extra_env={'MPLBACKEND': 'tkagg'}
+    )

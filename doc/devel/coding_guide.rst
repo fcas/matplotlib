@@ -15,22 +15,28 @@ consistency, and maintainability of the code base.
 
 .. _code-style:
 
-PEP8, as enforced by flake8
-===========================
+PEP8, as enforced by ruff
+=========================
 
-Formatting should follow the recommendations of PEP8_, as enforced by flake8_.
+Formatting should follow the recommendations of PEP8_, as enforced by ruff_.
 Matplotlib modifies PEP8 to extend the maximum line length to 88
-characters. You can check flake8 compliance from the command line with ::
+characters. You can check PEP8 compliance from the command line with ::
 
-    python -m pip install flake8
-    flake8 /path/to/module.py
+    python -m pip install ruff
+    ruff check /path/to/module.py
 
-or your editor may provide integration with it.  Note that Matplotlib intentionally
-does not use the black_ auto-formatter (1__), in particular due to its inability
-to understand the semantics of mathematical expressions (2__, 3__).
+or your editor may provide integration with it. To check all files,
+and fix any errors in-place (where possible) run ::
+
+    ruff check --fix
+
+
+Matplotlib intentionally does not use the black_ auto-formatter (1__),
+in particular due to its inability to understand the semantics of
+mathematical expressions (2__, 3__).
 
 .. _PEP8: https://www.python.org/dev/peps/pep-0008/
-.. _flake8: https://flake8.pycqa.org/
+.. _ruff: https://docs.astral.sh/ruff/
 .. _black: https://black.readthedocs.io/
 .. __: https://github.com/matplotlib/matplotlib/issues/18796
 .. __: https://github.com/psf/black/issues/148
@@ -89,8 +95,12 @@ We generally use `stub files
 the type information for ``colors.py``. A notable exception is ``pyplot.py``,
 which is type hinted inline.
 
-Type hints are checked by the mypy :ref:`pre-commit hook <pre-commit-hooks>`,
-can often be verified by running ``tox -e stubtest``.
+Type hints can be validated by the `stubtest
+<https://mypy.readthedocs.io/en/stable/stubtest.html>`_ tool, which can be run
+locally using ``tox -e stubtest`` and is a part of the :ref:`automated-tests`
+suite. Type hints for existing functions are also checked by the mypy
+:ref:`pre-commit hook <pre-commit-hooks>`.
+
 
 New modules and files: installation
 ===================================
@@ -120,6 +130,44 @@ C/C++ extensions
   close to upstream whenever possible.  It can be modified to fix bugs or
   implement new features only if the required changes cannot be made elsewhere
   in the codebase.  In particular, avoid making style fixes to it.
+
+.. _clang-tidy:
+
+Static analysis with clang-tidy
+-------------------------------
+
+Matplotlib's C/C++ sources in :file:`src/` are checked with
+`clang-tidy <https://clang.llvm.org/extra/clang-tidy/>`__ in CI (see
+:file:`.github/workflows/linting.yml`).  The check
+configuration lives in :file:`.clang-tidy`.
+
+The logic lives in :file:`tools/run_clang_tidy.py`.  It requires
+``clang-tidy`` on ``PATH`` and ``meson`` and ``pybind11`` installed::
+
+    pip install meson pybind11 setuptools-scm
+
+On macOS, ``clang-tidy`` is not on ``PATH`` after a Homebrew install::
+
+    brew install llvm
+    export PATH=$(brew --prefix llvm)/bin:$PATH
+
+The script uses a dedicated ``build/clang-tidy/`` directory (created
+automatically on first run) and delegates to meson's built-in
+``clang-tidy`` target. To run locally:
+
+.. code-block:: bash
+
+   python tools/run_clang_tidy.py
+
+
+To suppress false-positives use narrow checks and a comment:
+
+.. code-block:: c++
+
+   *indices++ = value;  // NOLINT(clang-analyzer-security.ArrayBound): loop
+   // iterates exactly N times; the analyzer cannot prove this from the macro.
+
+
 
 .. _keyword-argument-processing:
 
@@ -180,8 +228,8 @@ local arguments and the rest are passed on as
 
 .. _using_logging:
 
-Using logging for debug messages
-================================
+Use logging for debug messages
+==============================
 
 Matplotlib uses the standard Python `logging` library to write verbose
 warnings, information, and debug messages. Please use it! In all those places
@@ -205,7 +253,7 @@ If an end-user of Matplotlib sets up `logging` to display at levels more
 verbose than ``logging.WARNING`` in their code with the Matplotlib-provided
 helper::
 
-  plt.set_loglevel("debug")
+  plt.set_loglevel("DEBUG")
 
 or manually with ::
 

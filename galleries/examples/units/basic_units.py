@@ -2,14 +2,21 @@
 .. _basic_units:
 
 ===========
-Basic Units
+Basic units
 ===========
+
+
+This file implements a units library that supports registering arbitrary units,
+conversions between units, and math with unitized data. This library also implements a
+Matplotlib unit converter and registers its units with Matplotlib. This library is used
+in the examples to demonstrate Matplotlib's unit support. It is only maintained for the
+purposes of building documentation and should never be used outside of the Matplotlib
+documentation.
 
 """
 
+import itertools
 import math
-
-from packaging.version import parse as parse_version
 
 import numpy as np
 
@@ -146,10 +153,10 @@ class TaggedValue(metaclass=TaggedValueMeta):
             return getattr(variable, name)
         return object.__getattribute__(self, name)
 
-    def __array__(self, dtype=object):
+    def __array__(self, dtype=object, copy=False):
         return np.asarray(self.value, dtype)
 
-    def __array_wrap__(self, array, context):
+    def __array_wrap__(self, array, context=None, return_scalar=False):
         return TaggedValue(array, self.unit)
 
     def __repr__(self):
@@ -161,9 +168,8 @@ class TaggedValue(metaclass=TaggedValueMeta):
     def __len__(self):
         return len(self.value)
 
-    if parse_version(np.__version__) >= parse_version('1.20'):
-        def __getitem__(self, key):
-            return TaggedValue(self.value[key], self.unit)
+    def __getitem__(self, key):
+        return TaggedValue(self.value[key], self.unit)
 
     def __iter__(self):
         # Return a generator expression rather than use `yield`, so that
@@ -192,6 +198,11 @@ class TaggedValue(metaclass=TaggedValueMeta):
 
 
 class BasicUnit:
+    # numpy scalars convert eager and np.float64(2) * BasicUnit('cm')
+    # would thus return a numpy scalar. To avoid this, we increase the
+    # priority of the BasicUnit.
+    __array_priority__ = np.float64(0).__array_priority__ + 1
+
     def __init__(self, name, fullname=None):
         self.name = name
         if fullname is None:
@@ -222,10 +233,10 @@ class BasicUnit:
     def __rmul__(self, lhs):
         return self*lhs
 
-    def __array_wrap__(self, array, context):
+    def __array_wrap__(self, array, context=None, return_scalar=False):
         return TaggedValue(array, self)
 
-    def __array__(self, t=None, context=None):
+    def __array__(self, t=None, context=None, copy=False):
         ret = np.array(1)
         if t is not None:
             return ret.astype(t)
@@ -254,7 +265,7 @@ class BasicUnit:
 
 class UnitResolver:
     def addition_rule(self, units):
-        for unit_1, unit_2 in zip(units[:-1], units[1:]):
+        for unit_1, unit_2 in itertools.pairwise(units):
             if unit_1 != unit_2:
                 return NotImplemented
         return units[0]

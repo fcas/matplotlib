@@ -58,13 +58,14 @@ class UniformTriRefiner(TriRefiner):
 #    :class:`~matplotlib.tri.CubicTriInterpolator` and
 #    :class:`~matplotlib.tri.TriAnalyzer`.
 #    """
+
     def __init__(self, triangulation):
         super().__init__(triangulation)
 
     def refine_triangulation(self, return_tri_index=False, subdiv=3):
         """
         Compute a uniformly refined triangulation *refi_triangulation* of
-        the encapsulated :attr:`triangulation`.
+        the encapsulated :attr:`!triangulation`.
 
         This function refines the encapsulated triangulation by splitting each
         father triangle into 4 child sub-triangles built on the edges midside

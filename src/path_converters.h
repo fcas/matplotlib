@@ -3,8 +3,11 @@
 #ifndef MPL_PATH_CONVERTERS_H
 #define MPL_PATH_CONVERTERS_H
 
+#include <pybind11/pybind11.h>
+
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 #include "agg_clip_liang_barsky.h"
 #include "mplutils.h"
@@ -56,9 +59,7 @@ class EmbeddedQueue
 
     struct item
     {
-        item()
-        {
-        }
+        item() = default;
 
         inline void set(const unsigned cmd_, const double x_, const double y_)
         {
@@ -529,6 +530,24 @@ enum e_snap_mode {
     SNAP_TRUE
 };
 
+namespace PYBIND11_NAMESPACE { namespace detail {
+    template <> struct type_caster<e_snap_mode> {
+    public:
+        PYBIND11_TYPE_CASTER(e_snap_mode, const_name("e_snap_mode"));
+
+        bool load(handle src, bool) {
+            if (src.is_none()) {
+                value = SNAP_AUTO;
+                return true;
+            }
+
+            value = src.cast<bool>() ? SNAP_TRUE : SNAP_FALSE;
+
+            return true;
+        }
+    };
+}} // namespace PYBIND11_NAMESPACE::detail
+
 template <class VertexSource>
 class PathSnapper
 {
@@ -541,7 +560,7 @@ class PathSnapper
     {
         // If this contains only straight horizontal or vertical lines, it should be
         // snapped to the nearest pixels
-        double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        double x_start = 0, y_start = 0, x0 = 0, y0 = 0, x1 = 0, y1 = 0;
         unsigned code;
 
         switch (snap_mode) {
@@ -555,6 +574,10 @@ class PathSnapper
                 return false;
             }
 
+            // Store the initial vertex in case the path gets closed
+            x_start = x0;
+            y_start = y0;
+
             while ((code = path.vertex(&x1, &y1)) != agg::path_cmd_stop) {
                 switch (code) {
                 case agg::path_cmd_curve3:
@@ -564,6 +587,17 @@ class PathSnapper
                     if (fabs(x0 - x1) >= 1e-4 && fabs(y0 - y1) >= 1e-4) {
                         return false;
                     }
+                    break;
+                case (agg::path_cmd_end_poly | agg::path_flags_close):
+                    if (fabs(x0 - x_start) >= 1e-4 && fabs(y0 - y_start) >= 1e-4) {
+                        return false;
+                    }
+                    break;
+                case agg::path_cmd_move_to:
+                    // Update the initial vertex for a new sub-path
+                    x_start = x1;
+                    y_start = y1;
+                    break;
                 }
                 x0 = x1;
                 y0 = y1;
@@ -643,6 +677,13 @@ class PathSimplifier : protected EmbeddedQueue<9>
           m_moveto(true),
           m_after_moveto(false),
           m_clipped(false),
+
+          // whether the most recent MOVETO vertex is valid
+          m_has_init(false),
+
+          // the most recent MOVETO vertex
+          m_initX(0.0),
+          m_initY(0.0),
 
           // the x, y values from last iteration
           m_lastx(0.0),
@@ -754,6 +795,15 @@ class PathSimplifier : protected EmbeddedQueue<9>
                     _push(x, y);
                 }
                 m_after_moveto = true;
+
+                if (std::isfinite(*x) && std::isfinite(*y)) {
+                    m_has_init = true;
+                    m_initX = *x;
+                    m_initY = *y;
+                } else {
+                    m_has_init = false;
+                }
+
                 m_lastx = *x;
                 m_lasty = *y;
                 m_moveto = false;
@@ -767,6 +817,19 @@ class PathSimplifier : protected EmbeddedQueue<9>
                 continue;
             }
             m_after_moveto = false;
+
+            if(agg::is_close(cmd)) {
+                if (m_has_init) {
+                    /* If we have a valid initial vertex, then
+                       replace the current vertex with the initial vertex */
+                    *x = m_initX;
+                    *y = m_initY;
+                } else {
+                    /* If we don't have a valid initial vertex, then
+                       we can't close the path, so we skip the vertex */
+                    continue;
+                }
+            }
 
             /* NOTE: We used to skip this very short segments, but if
                you have a lot of them cumulatively, you can miss
@@ -919,6 +982,8 @@ class PathSimplifier : protected EmbeddedQueue<9>
     bool m_moveto;
     bool m_after_moveto;
     bool m_clipped;
+    bool m_has_init;
+    double m_initX, m_initY;
     double m_lastx, m_lasty;
 
     double m_origdx;
@@ -1019,8 +1084,18 @@ class Sketch
     {
         rewind(0);
         const double d_M_PI = 3.14159265358979323846;
-        m_p_scale = (2.0 * d_M_PI) / (m_length * m_randomness);
-        m_log_randomness = 2.0 * log(m_randomness);
+        // Set derived values to zero if m_length or m_randomness are zero to
+        // avoid divide-by-zero errors when a sketch is created but not used.
+        if (m_length <= std::numeric_limits<double>::epsilon() || m_randomness <= std::numeric_limits<double>::epsilon()) {
+            m_p_scale = 0.0;
+        } else {
+            m_p_scale = (2.0 * d_M_PI) / (m_length * m_randomness);
+        }
+        if (m_randomness <= std::numeric_limits<double>::epsilon()) {
+            m_log_randomness = 0.0;
+        } else {
+            m_log_randomness = 2.0 * log(m_randomness);
+        }
     }
 
     unsigned vertex(double *x, double *y)

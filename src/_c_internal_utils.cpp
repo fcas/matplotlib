@@ -7,7 +7,14 @@
 #define WIN32_LEAN_AND_MEAN
 // Windows 10, for latest HiDPI API support.
 #define WINVER 0x0A00
-#define _WIN32_WINNT 0x0A00
+#if defined(_WIN32_WINNT)
+#if _WIN32_WINNT < WINVER
+#undef _WIN32_WINNT
+#define _WIN32_WINNT WINVER
+#endif
+#else
+#define _WIN32_WINNT WINVER
+#endif
 #endif
 #include <pybind11/pybind11.h>
 #ifdef __linux__
@@ -21,12 +28,16 @@
 #else
 #define UNUSED_ON_NON_WINDOWS Py_UNUSED
 #endif
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#include <CoreText/CoreText.h>
+#endif
 
 namespace py = pybind11;
 using namespace pybind11::literals;
 
 static bool
-mpl_display_is_valid(void)
+mpl_xdisplay_is_valid(void)
 {
 #ifdef __linux__
     void* libX11;
@@ -34,13 +45,13 @@ mpl_display_is_valid(void)
     // than dlopen().
     if (getenv("DISPLAY")
         && (libX11 = dlopen("libX11.so.6", RTLD_LAZY))) {
-        typedef struct Display* (*XOpenDisplay_t)(char const*);
-        typedef int (*XCloseDisplay_t)(struct Display*);
-        struct Display* display = NULL;
-        XOpenDisplay_t XOpenDisplay = (XOpenDisplay_t)dlsym(libX11, "XOpenDisplay");
-        XCloseDisplay_t XCloseDisplay = (XCloseDisplay_t)dlsym(libX11, "XCloseDisplay");
+        struct Display* display = nullptr;
+        auto XOpenDisplay = (struct Display* (*)(char const*))
+            dlsym(libX11, "XOpenDisplay");
+        auto XCloseDisplay = (int (*)(struct Display*))
+            dlsym(libX11, "XCloseDisplay");
         if (XOpenDisplay && XCloseDisplay
-                && (display = XOpenDisplay(NULL))) {
+                && (display = XOpenDisplay(nullptr))) {
             XCloseDisplay(display);
         }
         if (dlclose(libX11)) {
@@ -50,18 +61,29 @@ mpl_display_is_valid(void)
             return true;
         }
     }
+    return false;
+#else
+    return true;
+#endif
+}
+
+static bool
+mpl_display_is_valid(void)
+{
+#ifdef __linux__
+    if (mpl_xdisplay_is_valid()) {
+        return true;
+    }
     void* libwayland_client;
     if (getenv("WAYLAND_DISPLAY")
         && (libwayland_client = dlopen("libwayland-client.so.0", RTLD_LAZY))) {
-        typedef struct wl_display* (*wl_display_connect_t)(char const*);
-        typedef void (*wl_display_disconnect_t)(struct wl_display*);
-        struct wl_display* display = NULL;
-        wl_display_connect_t wl_display_connect =
-            (wl_display_connect_t)dlsym(libwayland_client, "wl_display_connect");
-        wl_display_disconnect_t wl_display_disconnect =
-            (wl_display_disconnect_t)dlsym(libwayland_client, "wl_display_disconnect");
+        struct wl_display* display = nullptr;
+        auto wl_display_connect = (struct wl_display* (*)(char const*))
+            dlsym(libwayland_client, "wl_display_connect");
+        auto wl_display_disconnect = (void (*)(struct wl_display*))
+            dlsym(libwayland_client, "wl_display_disconnect");
         if (wl_display_connect && wl_display_disconnect
-                && (display = wl_display_connect(NULL))) {
+                && (display = wl_display_connect(nullptr))) {
             wl_display_disconnect(display);
         }
         if (dlclose(libwayland_client)) {
@@ -74,6 +96,61 @@ mpl_display_is_valid(void)
     return false;
 #else
     return true;
+#endif
+}
+
+static py::object
+mpl_get_available_fonts(void)
+{
+#if defined(__APPLE__)
+    py::set fonts;
+
+    auto cfStringToPyStr = [](CFStringRef str) -> py::str {
+        auto cstr = CFStringGetCStringPtr(str, kCFStringEncodingUTF8);
+        if (cstr) {
+            return py::str(cstr);
+        }
+        auto length = CFStringGetLength(str);
+        auto maxSize = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8) + 1;
+        auto buffer = std::make_unique<char[]>(maxSize);
+        py::str result;
+        if (CFStringGetCString(str, buffer.get(), maxSize, kCFStringEncodingUTF8)) {
+            result = py::str(buffer.get());
+        }
+        return result;
+    };
+
+    auto collection = CTFontCollectionCreateFromAvailableFonts(NULL);
+    auto descriptors = collection ?
+        CTFontCollectionCreateMatchingFontDescriptors(collection) : NULL;
+    auto count = descriptors ? CFArrayGetCount(descriptors) : 0;
+    for (CFIndex i = 0; i < count; i++) {
+        auto descriptor = static_cast<CTFontDescriptorRef>(
+            CFArrayGetValueAtIndex(descriptors, i));
+        auto url = static_cast<CFURLRef>(
+            CTFontDescriptorCopyAttribute(descriptor, kCTFontURLAttribute));
+        CFStringRef path = nullptr;
+        if (url) {
+            path = CFURLCopyFileSystemPath(url, kCFURLPOSIXPathStyle);
+            CFRelease(url);
+        }
+        if (path) {
+            auto pyStr = cfStringToPyStr(path);
+            if (pyStr) {
+                fonts.add(pyStr);
+            }
+            CFRelease(path);
+        }
+    }
+    if (descriptors) {
+        CFRelease(descriptors);
+    }
+    if (collection) {
+        CFRelease(collection);
+    }
+    return fonts;
+#else
+    return py::none();
 #endif
 }
 
@@ -111,7 +188,11 @@ static py::object
 mpl_GetForegroundWindow(void)
 {
 #ifdef _WIN32
-  return py::capsule(GetForegroundWindow(), "HWND");
+  if (HWND hwnd = GetForegroundWindow()) {
+    return py::capsule(hwnd, "HWND");
+  } else {
+    return py::none();
+  }
 #else
   return py::none();
 #endif
@@ -121,7 +202,7 @@ static void
 mpl_SetForegroundWindow(py::capsule UNUSED_ON_NON_WINDOWS(handle_p))
 {
 #ifdef _WIN32
-    if (handle_p.name() != "HWND") {
+    if (strcmp(handle_p.name(), "HWND") != 0) {
         throw std::runtime_error("Handle must be a value returned from Win32_GetForegroundWindow");
     }
     HWND handle = static_cast<HWND>(handle_p.get_pointer());
@@ -138,25 +219,19 @@ mpl_SetProcessDpiAwareness_max(void)
 #ifdef _DPI_AWARENESS_CONTEXTS_
     // These functions and options were added in later Windows 10 updates, so
     // must be loaded dynamically.
-    typedef BOOL (WINAPI *IsValidDpiAwarenessContext_t)(DPI_AWARENESS_CONTEXT);
-    typedef BOOL (WINAPI *SetProcessDpiAwarenessContext_t)(DPI_AWARENESS_CONTEXT);
-
     HMODULE user32 = LoadLibrary("user32.dll");
-    IsValidDpiAwarenessContext_t IsValidDpiAwarenessContextPtr =
-        (IsValidDpiAwarenessContext_t)GetProcAddress(
-            user32, "IsValidDpiAwarenessContext");
-    SetProcessDpiAwarenessContext_t SetProcessDpiAwarenessContextPtr =
-        (SetProcessDpiAwarenessContext_t)GetProcAddress(
-            user32, "SetProcessDpiAwarenessContext");
+    auto IsValidDpiAwarenessContext = (BOOL (WINAPI *)(DPI_AWARENESS_CONTEXT))
+        GetProcAddress(user32, "IsValidDpiAwarenessContext");
+    auto SetProcessDpiAwarenessContext = (BOOL (WINAPI *)(DPI_AWARENESS_CONTEXT))
+        GetProcAddress(user32, "SetProcessDpiAwarenessContext");
     DPI_AWARENESS_CONTEXT ctxs[3] = {
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,  // Win10 Creators Update
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,     // Win10
         DPI_AWARENESS_CONTEXT_SYSTEM_AWARE};         // Win10
-    if (IsValidDpiAwarenessContextPtr != NULL
-            && SetProcessDpiAwarenessContextPtr != NULL) {
-        for (int i = 0; i < sizeof(ctxs) / sizeof(DPI_AWARENESS_CONTEXT); ++i) {
-            if (IsValidDpiAwarenessContextPtr(ctxs[i])) {
-                SetProcessDpiAwarenessContextPtr(ctxs[i]);
+    if (IsValidDpiAwarenessContext && SetProcessDpiAwarenessContext) {
+        for (size_t i = 0; i < sizeof(ctxs) / sizeof(DPI_AWARENESS_CONTEXT); ++i) {
+            if (IsValidDpiAwarenessContext(ctxs[i])) {
+                SetProcessDpiAwarenessContext(ctxs[i]);
                 break;
             }
         }
@@ -172,7 +247,7 @@ mpl_SetProcessDpiAwareness_max(void)
 #endif
 }
 
-PYBIND11_MODULE(_c_internal_utils, m)
+PYBIND11_MODULE(_c_internal_utils, m, py::mod_gil_not_used())
 {
     m.def(
         "display_is_valid", &mpl_display_is_valid,
@@ -184,6 +259,23 @@ PYBIND11_MODULE(_c_internal_utils, m)
         succeeds.
 
         On other platforms, always returns True.)""");
+    m.def(
+        "xdisplay_is_valid", &mpl_xdisplay_is_valid,
+        R"""(        --
+        Check whether the current X11 display is valid.
+
+        On Linux, returns True if either $DISPLAY is set and XOpenDisplay(NULL)
+        succeeds. Use this function if you need to specifically check for X11
+        only (e.g., for Tkinter).
+
+        On other platforms, always returns True.)""");
+    m.def(
+        "get_available_fonts", &mpl_get_available_fonts,
+        R"""(        --
+        On macOS, uses CoreText to find all fonts available to the current
+        process and returns the paths as a set of strings.
+
+        On other platforms, always returns None.)""");
     m.def(
         "Win32_GetCurrentProcessExplicitAppUserModelID",
         &mpl_GetCurrentProcessExplicitAppUserModelID,

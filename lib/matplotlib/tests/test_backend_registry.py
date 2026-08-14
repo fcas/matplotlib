@@ -3,7 +3,6 @@ from typing import Any
 
 import pytest
 
-import matplotlib as mpl
 from matplotlib.backends import BackendFilter, backend_registry
 
 
@@ -86,14 +85,13 @@ def test_is_valid_backend(backend, is_valid):
     assert backend_registry.is_valid_backend(backend) == is_valid
 
 
-def test_deprecated_rcsetup_attributes():
-    match = "was deprecated in Matplotlib 3.9"
-    with pytest.warns(mpl.MatplotlibDeprecationWarning, match=match):
-        mpl.rcsetup.interactive_bk
-    with pytest.warns(mpl.MatplotlibDeprecationWarning, match=match):
-        mpl.rcsetup.non_interactive_bk
-    with pytest.warns(mpl.MatplotlibDeprecationWarning, match=match):
-        mpl.rcsetup.all_backends
+@pytest.mark.parametrize("backend, normalized", [
+    ("agg", "matplotlib.backends.backend_agg"),
+    ("QtAgg", "matplotlib.backends.backend_qtagg"),
+    ("module://Anything", "Anything"),
+])
+def test_backend_normalization(backend, normalized):
+    assert backend_registry._backend_module_name(backend) == normalized
 
 
 def test_entry_points_inline():
@@ -119,6 +117,17 @@ def test_entry_point_name_duplicate(clear_backend_registry):
     with pytest.raises(RuntimeError):
         backend_registry._validate_and_store_entry_points(
             [('some_name', 'module1'), ('some_name', 'module2')])
+
+
+def test_entry_point_identical(clear_backend_registry):
+    # Issue https://github.com/matplotlib/matplotlib/issues/28367
+    # Multiple entry points with the same name and value (value is the module)
+    # are acceptable.
+    n = len(backend_registry._name_to_module)
+    backend_registry._validate_and_store_entry_points(
+        [('some_name', 'some.module'), ('some_name', 'some.module')])
+    assert len(backend_registry._name_to_module) == n+1
+    assert backend_registry._name_to_module['some_name'] == 'module://some.module'
 
 
 def test_entry_point_name_is_module(clear_backend_registry):

@@ -236,7 +236,7 @@ fig, axs = plt.subplots(3, 1, figsize=(6.4, 7), layout='constrained')
 x = np.arange(100)
 ax = axs[0]
 ax.plot(x, x)
-label = f'Converter: {ax.xaxis.converter}\n '
+label = f'Converter: {ax.xaxis.get_converter()}\n '
 label += f'Locator: {ax.xaxis.get_major_locator()}\n'
 label += f'Formatter: {ax.xaxis.get_major_formatter()}\n'
 ax.set_xlabel(label)
@@ -245,7 +245,7 @@ ax = axs[1]
 time = np.arange('1980-01-01', '1980-06-25', dtype='datetime64[D]')
 x = np.arange(len(time))
 ax.plot(time, x)
-label = f'Converter: {ax.xaxis.converter}\n '
+label = f'Converter: {ax.xaxis.get_converter()}\n '
 label += f'Locator: {ax.xaxis.get_major_locator()}\n'
 label += f'Formatter: {ax.xaxis.get_major_formatter()}\n'
 ax.set_xlabel(label)
@@ -255,7 +255,7 @@ data = {'apple': 10, 'orange': 15, 'lemon': 5, 'lime': 20}
 names = list(data.keys())
 values = list(data.values())
 ax.plot(names, values)
-label = f'Converter: {ax.xaxis.converter}\n '
+label = f'Converter: {ax.xaxis.get_converter()}\n '
 label += f'Locator: {ax.xaxis.get_major_locator()}\n'
 label += f'Formatter: {ax.xaxis.get_major_formatter()}\n'
 ax.set_xlabel(label)
@@ -272,7 +272,7 @@ ax.set_xlabel(label)
 # Unit support works by querying the type of data passed to the plotting
 # function and dispatching to the first converter in a list that accepts that
 # type of data.  So below, if ``x`` has ``datetime`` objects in it, the
-# converter will be ``_SwitchableDateConverter``; if it has has strings in it,
+# converter will be ``_SwitchableDateConverter``; if it has strings in it,
 # it will be sent to the ``StrCategoryConverter``.
 
 for k, v in munits.registry.items():

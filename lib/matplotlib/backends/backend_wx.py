@@ -30,7 +30,7 @@ from matplotlib.path import Path
 from matplotlib.transforms import Affine2D
 
 import wx
-import wx.svg
+import wx.svg  # noqa: F401
 
 _log = logging.getLogger(__name__)
 
@@ -686,6 +686,22 @@ class _FigureCanvasWxBase(FigureCanvasBase, wx.Panel):
         self.draw_idle()
 
     @staticmethod
+    def _mpl_buttons():
+        state = wx.GetMouseState()
+        # NOTE: Alternatively, we could use event.LeftIsDown() / etc. but this
+        # fails to report multiclick drags on macOS (other OSes have not been
+        # verified).
+        mod_table = [
+            (MouseButton.LEFT, state.LeftIsDown()),
+            (MouseButton.RIGHT, state.RightIsDown()),
+            (MouseButton.MIDDLE, state.MiddleIsDown()),
+            (MouseButton.BACK, state.Aux1IsDown()),
+            (MouseButton.FORWARD, state.Aux2IsDown()),
+        ]
+        # State *after* press/release.
+        return {button for button, flag in mod_table if flag}
+
+    @staticmethod
     def _mpl_modifiers(event=None, *, exclude=None):
         mod_table = [
             ("ctrl", wx.MOD_CONTROL, wx.WXK_CONTROL),
@@ -730,9 +746,9 @@ class _FigureCanvasWxBase(FigureCanvasBase, wx.Panel):
         # flip y so y=0 is bottom of canvas
         if not wx.Platform == '__WXMSW__':
             scale = self.GetDPIScaleFactor()
-            return x*scale, self.figure.bbox.height - y*scale
+            return x*scale, self.get_width_height(physical=True)[1] - y*scale
         else:
-            return x, self.figure.bbox.height - y
+            return x, self.get_width_height(physical=True)[1] - y
 
     def _on_key_down(self, event):
         """Capture key press."""
@@ -752,7 +768,7 @@ class _FigureCanvasWxBase(FigureCanvasBase, wx.Panel):
 
     def set_cursor(self, cursor):
         # docstring inherited
-        cursor = wx.Cursor(_api.check_getitem({
+        cursor = wx.Cursor(_api.getitem_checked({
             cursors.MOVE: wx.CURSOR_HAND,
             cursors.HAND: wx.CURSOR_HAND,
             cursors.POINTER: wx.CURSOR_ARROW,
@@ -794,9 +810,8 @@ class _FigureCanvasWxBase(FigureCanvasBase, wx.Panel):
             MouseEvent("button_press_event", self, x, y, button,
                        modifiers=modifiers, guiEvent=event)._process()
         elif event.ButtonDClick():
-            MouseEvent("button_press_event", self, x, y, button,
-                       dblclick=True, modifiers=modifiers,
-                       guiEvent=event)._process()
+            MouseEvent("button_press_event", self, x, y, button, dblclick=True,
+                       modifiers=modifiers, guiEvent=event)._process()
         elif event.ButtonUp():
             MouseEvent("button_release_event", self, x, y, button,
                        modifiers=modifiers, guiEvent=event)._process()
@@ -826,6 +841,7 @@ class _FigureCanvasWxBase(FigureCanvasBase, wx.Panel):
         event.Skip()
         MouseEvent("motion_notify_event", self,
                    *self._mpl_coords(event),
+                   buttons=self._mpl_buttons(),
                    modifiers=self._mpl_modifiers(event),
                    guiEvent=event)._process()
 
@@ -919,10 +935,16 @@ class FigureFrameWx(wx.Frame):
         # otherwise the toolbar further resizes the canvas.
         w, h = map(math.ceil, fig.bbox.size)
         self.canvas.SetInitialSize(self.FromDIP(wx.Size(w, h)))
-        self.canvas.SetMinSize(self.FromDIP(wx.Size(2, 2)))
         self.canvas.SetFocus()
 
+        # Size the frame to the canvas's initial size *before* relaxing the
+        # canvas min size.  ``SetInitialSize`` sets both the size and the min
+        # size to (w, h); with wxPython 4.3 (wxWidgets 3.3) ``Fit`` uses the
+        # current min size, so shrinking it to (2, 2) first collapses the
+        # window to a tiny size (GH #32143).  Relax the min size afterwards so
+        # the user can still resize the window smaller.
         self.Fit()
+        self.canvas.SetMinSize(self.FromDIP(wx.Size(2, 2)))
 
         self.Bind(wx.EVT_CLOSE, self._on_close)
 
@@ -996,6 +1018,7 @@ class FigureManagerWx(FigureManagerBase):
             # As this can be called from non-GUI thread from plt.close use
             # wx.CallAfter to ensure thread safety.
             wx.CallAfter(frame.Close)
+        super().destroy()
 
     def full_screen_toggle(self):
         # docstring inherited
@@ -1143,6 +1166,7 @@ class NavigationToolbar2Wx(NavigationToolbar2, wx.ToolBar):
                 mpl.rcParams["savefig.directory"] = str(path.parent)
             try:
                 self.canvas.figure.savefig(path, format=fmt)
+                return path
             except Exception as e:
                 dialog = wx.MessageDialog(
                     parent=self.canvas.GetParent(), message=str(e),
@@ -1151,7 +1175,7 @@ class NavigationToolbar2Wx(NavigationToolbar2, wx.ToolBar):
                 dialog.Destroy()
 
     def draw_rubberband(self, event, x0, y0, x1, y1):
-        height = self.canvas.figure.bbox.height
+        height = self.canvas.get_width_height(physical=True)[1]
         sf = 1 if wx.Platform == '__WXMSW__' else self.canvas.GetDPIScaleFactor()
         self.canvas._rubberband_rect = (x0/sf, (height - y0)/sf,
                                         x1/sf, (height - y1)/sf)
@@ -1197,8 +1221,8 @@ class ToolbarWx(ToolContainerBase, wx.ToolBar):
         ``ToolBar.GetToolPos`` is not useful because wx assigns the same Id to
         all Separators and StretchableSpaces.
         """
-        pos, = [pos for pos in range(self.ToolsCount)
-                if self.GetToolByPos(pos) == tool]
+        pos, = (pos for pos in range(self.ToolsCount)
+                if self.GetToolByPos(pos) == tool)
         return pos
 
     def add_toolitem(self, name, group, position, image_file, description,

@@ -51,6 +51,14 @@ versions no longer support our minimum NumPy or Python.
 
 We will work around bugs in our dependencies when practical.
 
+IPython and Matplotlib do not formally depend on each other, however there is
+practical coupling for the integration of Matplotlib's UI into IPython and
+IPykernel.  We will ensure this integration works with at least minor or major
+versions of IPython and IPykernel released in the 24 months prior to our
+planned release date.  Matplotlib may or may not work with older versions and
+we will not warn if used with IPython or IPykernel outside of this window.
+
+
 
 Test and documentation dependencies
 ===================================
@@ -107,6 +115,9 @@ specification of the dependencies.
 ==========  ========  ======
 Matplotlib  Python    NumPy
 ==========  ========  ======
+3.12        3.12      2.0.0
+3.11        3.11      1.25.0
+`3.10`_     3.10      1.23.0
 `3.9`_      3.9       1.23.0
 `3.8`_      3.9       1.21.0
 `3.7`_      3.8       1.20.0
@@ -128,6 +139,7 @@ Matplotlib  Python    NumPy
 1.0         2.4       1.1
 ==========  ========  ======
 
+.. _`3.10`: https://matplotlib.org/3.10.0/devel/dependencies.html
 .. _`3.9`: https://matplotlib.org/3.9.0/devel/dependencies.html
 .. _`3.8`: https://matplotlib.org/3.8.0/devel/dependencies.html
 .. _`3.7`: https://matplotlib.org/3.7.0/devel/dependencies.html
@@ -144,3 +156,50 @@ Matplotlib  Python    NumPy
 .. _`1.5`: https://matplotlib.org/1.5.0/users/installing.html#required-dependencies
 .. _`1.4`: https://matplotlib.org/1.4.0/users/installing.html#required-dependencies
 .. _`1.3`: https://matplotlib.org/1.3.0/users/installing.html#build-requirements
+
+
+Update Python and NumPy versions
+================================
+
+To update the minimum versions of Python we need to update:
+
+- ``pyproject.toml`` (classifiers, requires-python, ``[tool.ruff]`` target-version)
+- ``environment.yml``
+- ``doc/install/dependencies.rst``
+- ``doc/devel/min_dep_policy.rst`` (this file)
+- CI configuration files (circle, GHA, azure)
+- ``tox.ini``
+
+To update the minimum NumPy we need to update:
+
+- ``pyproject.toml``
+- ``environment.yml``
+- ``doc/install/dependencies.rst``
+- ``doc/devel/min_dep_policy.rst`` (this file)
+- ``requirements/testing/minver.txt``
+- ``lib/matplotlib/__init__.py`` (matplotlib._check_versions())
+
+
+The work to leverage new features or remove workarounds for no-longer supported
+versions should be done in a follow-on PRs to keep the version bump PRs well
+scoped.
+
+In both cases add an api_changes/development with the following template:
+
+.. code-block:: rst
+
+   Increase to minimum supported versions of dependencies
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   For Matplotlib 3.ZZ, the :ref:`minimum supported versions <dependencies>` are
+   being bumped:
+
+   +------------+-----------------+----------------+
+   | Dependency |  min in mpl3.N  | min in mpl3.M  |
+   +============+=================+================+
+   |   Python   |       3.XX      |       3.AA     |
+   |   NumPy    |       1.YY      |       1.BB     |
+   +------------+-----------------+----------------+
+
+   This is consistent with our :ref:`min_deps_policy` and `SPEC0
+   <https://scientific-python.org/specs/spec-0000/>`__

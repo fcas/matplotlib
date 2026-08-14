@@ -14,7 +14,7 @@ import weakref
 from PIL import Image
 
 import matplotlib as mpl
-from matplotlib import _api, cbook, font_manager as fm
+from matplotlib import cbook, font_manager as fm
 from matplotlib.backend_bases import (
     _Backend, FigureCanvasBase, FigureManagerBase, RendererBase
 )
@@ -38,9 +38,17 @@ _DOCUMENTCLASS = r"\documentclass{article}"
 
 def _get_preamble():
     """Prepare a LaTeX preamble based on the rcParams configuration."""
-    font_size_pt = FontProperties(
-        size=mpl.rcParams["font.size"]
-    ).get_size_in_points()
+    def _to_fontspec():
+        for command, family in [("setmainfont", "serif"),
+                                ("setsansfont", "sans\\-serif"),
+                                ("setmonofont", "monospace")]:
+            font_path = fm.findfont(family)
+            path = pathlib.Path(font_path)
+            yield r"  \%s{%s}[Path=\detokenize{%s/}%s]" % (
+                command, path.name, path.parent.as_posix(),
+                f',FontIndex={font_path.face_index:d}' if path.suffix == '.ttc' else '')
+
+    font_size_pt = FontProperties(size=mpl.rcParams["font.size"]).get_size_in_points()
     return "\n".join([
         # Remove Matplotlib's custom command \mathdefault.  (Not using
         # \mathnormal instead since this looks odd with Computer Modern.)
@@ -63,15 +71,8 @@ def _get_preamble():
         *([
             r"\ifdefined\pdftexversion\else  % non-pdftex case.",
             r"  \usepackage{fontspec}",
-        ] + [
-            r"  \%s{%s}[Path=\detokenize{%s/}]"
-            % (command, path.name, path.parent.as_posix())
-            for command, path in zip(
-                ["setmainfont", "setsansfont", "setmonofont"],
-                [pathlib.Path(fm.findfont(family))
-                 for family in ["serif", "sans\\-serif", "monospace"]]
-            )
-        ] + [r"\fi"] if mpl.rcParams["pgf.rcfonts"] else []),
+            *_to_fontspec(),
+            r"\fi"] if mpl.rcParams["pgf.rcfonts"] else []),
         # Documented as "must come last".
         mpl.texmanager._usepackage_if_not_loaded("underscore", option="strings"),
     ])
@@ -153,6 +154,15 @@ def _metadata_to_str(key, value):
         value = value.name.decode('ascii')
     else:
         value = str(value)
+
+    # ensure that metadata does not contain special TeX chars because we
+    # insert the metadata as raw text into the TeX source
+    invalid_chars = r"\{}[]()"
+    if any(c in value + key for c in invalid_chars):
+        raise ValueError(
+            f"Invalid metadata value for {key!r}: {value!r}. "
+            f"The value must not contain the chars {invalid_chars}.")
+
     return f'{key}={{{value}}}'
 
 
@@ -281,7 +291,7 @@ class LatexManager:
         # it.
         try:
             self.latex = subprocess.Popen(
-                [mpl.rcParams["pgf.texsystem"], "-halt-on-error"],
+                [mpl.rcParams["pgf.texsystem"], "-halt-on-error", "-no-shell-escape"],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 encoding="utf-8", cwd=self.tmpdir)
         except FileNotFoundError as err:
@@ -751,7 +761,8 @@ class FigureCanvasPgf(FigureCanvasBase):
                  "pdf": "LaTeX compiled PGF picture",
                  "png": "Portable Network Graphics", }
 
-    def get_default_filetype(self):
+    @classmethod
+    def get_default_filetype(cls):
         return 'pdf'
 
     def _print_pgf_to_fh(self, fh, *, bbox_inches_restore=None):
@@ -848,9 +859,9 @@ class FigureCanvasPgf(FigureCanvasBase):
             texcommand = mpl.rcParams["pgf.texsystem"]
             cbook._check_and_log_subprocess(
                 [texcommand, "-interaction=nonstopmode", "-halt-on-error",
-                 "figure.tex"], _log, cwd=tmpdir)
-            with (tmppath / "figure.pdf").open("rb") as orig, \
-                 cbook.open_file_cm(fname_or_fh, "wb") as dest:
+                 "-no-shell-escape", "figure.tex"], _log, cwd=tmpdir)
+            with ((tmppath / "figure.pdf").open("rb") as orig,
+                  cbook.open_file_cm(fname_or_fh, "wb") as dest):
                 shutil.copyfileobj(orig, dest)  # copy file contents to target
 
     def print_png(self, fname_or_fh, **kwargs):
@@ -862,8 +873,8 @@ class FigureCanvasPgf(FigureCanvasBase):
             png_path = tmppath / "figure.png"
             self.print_pdf(pdf_path, **kwargs)
             converter(pdf_path, png_path, dpi=self.figure.dpi)
-            with png_path.open("rb") as orig, \
-                 cbook.open_file_cm(fname_or_fh, "wb") as dest:
+            with (png_path.open("rb") as orig,
+                  cbook.open_file_cm(fname_or_fh, "wb") as dest):
                 shutil.copyfileobj(orig, dest)  # copy file contents to target
 
     def get_renderer(self):
@@ -898,9 +909,7 @@ class PdfPages:
     ...     pdf.savefig()
     """
 
-    _UNSET = object()
-
-    def __init__(self, filename, *, keep_empty=_UNSET, metadata=None):
+    def __init__(self, filename, *, metadata=None):
         """
         Create a new PdfPages object.
 
@@ -909,10 +918,6 @@ class PdfPages:
         filename : str or path-like
             Plots using `PdfPages.savefig` will be written to a file at this
             location. Any older file with the same name is overwritten.
-
-        keep_empty : bool, default: True
-            If set to False, then empty pdf files will be deleted automatically
-            when closed.
 
         metadata : dict, optional
             Information dictionary object (see PDF reference section 10.2.1
@@ -929,16 +934,9 @@ class PdfPages:
         """
         self._output_name = filename
         self._n_figures = 0
-        if keep_empty and keep_empty is not self._UNSET:
-            _api.warn_deprecated("3.8", message=(
-                "Keeping empty pdf files is deprecated since %(since)s and support "
-                "will be removed %(removal)s."))
-        self._keep_empty = keep_empty
         self._metadata = (metadata or {}).copy()
         self._info_dict = _create_pdf_info_dict('pgf', self._metadata)
         self._file = BytesIO()
-
-    keep_empty = _api.deprecate_privatize_attribute("3.8")
 
     def _write_header(self, width_inches, height_inches):
         pdfinfo = ','.join(
@@ -969,11 +967,6 @@ class PdfPages:
         self._file.write(rb'\end{document}\n')
         if self._n_figures > 0:
             self._run_latex()
-        elif self._keep_empty:
-            _api.warn_deprecated("3.8", message=(
-                "Keeping empty pdf files is deprecated since %(since)s and support "
-                "will be removed %(removal)s."))
-            open(self._output_name, 'wb').close()
         self._file.close()
 
     def _run_latex(self):
@@ -983,7 +976,7 @@ class PdfPages:
             tex_source.write_bytes(self._file.getvalue())
             cbook._check_and_log_subprocess(
                 [texcommand, "-interaction=nonstopmode", "-halt-on-error",
-                 tex_source],
+                 "-no-shell-escape", tex_source],
                 _log, cwd=tmpdir)
             shutil.move(tex_source.with_suffix(".pdf"), self._output_name)
 

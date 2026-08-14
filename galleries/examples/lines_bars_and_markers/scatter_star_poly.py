@@ -3,7 +3,8 @@
 Marker examples
 ===============
 
-Example with different ways to specify markers.
+Demonstrates several ways to specify markers in scatter plots,
+including built-in marker styles and custom marker paths.
 
 See also the `matplotlib.markers` documentation for a list of all markers and
 :doc:`/gallery/lines_bars_and_markers/marker_reference` for more information
@@ -51,3 +52,9 @@ axs[1, 2].scatter(x, y, s=80, c=z, marker=(5, 2))
 axs[1, 2].set_title("marker=(5, 2)")
 
 plt.show()
+
+# %%
+# .. tags::
+#
+#    component: marker
+#    level: beginner

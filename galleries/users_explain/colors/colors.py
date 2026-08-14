@@ -61,9 +61,14 @@ Matplotlib recognizes the following formats to specify a color.
 +--------------------------------------+--------------------------------------+
 | "CN" color spec where ``'C'``        | - ``'C0'``                           |
 | precedes a number acting as an index | - ``'C1'``                           |
-| into the default property cycle.     +--------------------------------------+
-|                                      | :rc:`axes.prop_cycle`                |
-| .. note:: Matplotlib indexes color   |                                      |
+| into the default property cycle.     |                                      |
+|                                      |                                      |
+| .. note:: The cycle comes from the   |                                      |
+|           global                     |                                      |
+|           :rc:`axes.prop_cycle`, not |                                      |
+|           an Axes-local cycle set by |                                      |
+|           `~.Axes.set_prop_cycle`.   |                                      |
+|           Matplotlib indexes color   |                                      |
 |           at draw time and defaults  |                                      |
 |           to black if cycle does not |                                      |
 |           include color.             |                                      |
@@ -72,6 +77,10 @@ Matplotlib recognizes the following formats to specify a color.
 | formats and an alpha float.          | - ``('#f00', 0.9)``                  |
 |                                      |                                      |
 | .. versionadded:: 3.8                |                                      |
++--------------------------------------+--------------------------------------+
+| The special value "none" is fully    | - ``'none'``                         |
+| transparent, i.e. equivalent to a    |                                      |
+| RGBA value ``(0.0, 0.0, 0.0, 0.0)``  |                                      |
 +--------------------------------------+--------------------------------------+
 
 .. _xkcd color survey: https://xkcd.com/color/rgb/
@@ -193,7 +202,7 @@ overlap = {name for name in mcolors.CSS4_COLORS
            if f'xkcd:{name}' in mcolors.XKCD_COLORS}
 
 fig = plt.figure(figsize=[9, 5])
-ax = fig.add_axes([0, 0, 1, 1])
+ax = fig.add_axes((0, 0, 1, 1))
 
 n_groups = 3
 n_rows = len(overlap) // n_groups + 1

@@ -4,10 +4,15 @@ from typing import Literal
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from . import artist, cm, transforms
+from . import colorizer, transforms
 from .backend_bases import MouseEvent
 from .artist import Artist
-from .colors import Normalize, Colormap
+from .colors import (
+    Colormap,
+    BivarColormap,
+    MultivarColormap,
+    Norm,
+)
 from .lines import Line2D
 from .path import Path
 from .patches import Patch
@@ -15,12 +20,13 @@ from .ticker import Locator, Formatter
 from .tri import Triangulation
 from .typing import ColorType, LineStyleType, CapStyleType, JoinStyleType
 
-class Collection(artist.Artist, cm.ScalarMappable):
+class Collection(colorizer.ColorizingArtist):
     def __init__(
         self,
         *,
         edgecolors: ColorType | Sequence[ColorType] | None = ...,
         facecolors: ColorType | Sequence[ColorType] | None = ...,
+        hatchcolors: ColorType | Sequence[ColorType] | Literal["edge"] | None = ...,
         linewidths: float | Sequence[float] | None = ...,
         linestyles: LineStyleType | Sequence[LineStyleType] = ...,
         capstyle: CapStyleType | None = ...,
@@ -28,8 +34,9 @@ class Collection(artist.Artist, cm.ScalarMappable):
         antialiaseds: bool | Sequence[bool] | None = ...,
         offsets: tuple[float, float] | Sequence[tuple[float, float]] | None = ...,
         offset_transform: transforms.Transform | None = ...,
-        norm: Normalize | None = ...,
-        cmap: Colormap | None = ...,
+        norm: Norm | None = ...,
+        cmap: Colormap | BivarColormap | MultivarColormap | None = ...,
+        colorizer: colorizer.Colorizer | None = ...,
         pickradius: float = ...,
         hatch: str | None = ...,
         urls: Sequence[str] | None = ...,
@@ -48,6 +55,8 @@ class Collection(artist.Artist, cm.ScalarMappable):
     def get_urls(self) -> Sequence[str | None]: ...
     def set_hatch(self, hatch: str) -> None: ...
     def get_hatch(self) -> str: ...
+    def set_hatch_linewidth(self, lw: float) -> None: ...
+    def get_hatch_linewidth(self) -> float: ...
     def set_offsets(self, offsets: ArrayLike) -> None: ...
     def get_offsets(self) -> ArrayLike: ...
     def set_linewidth(self, lw: float | Sequence[float]) -> None: ...
@@ -63,6 +72,10 @@ class Collection(artist.Artist, cm.ScalarMappable):
     def get_facecolor(self) -> ColorType | Sequence[ColorType]: ...
     def get_edgecolor(self) -> ColorType | Sequence[ColorType]: ...
     def set_edgecolor(self, c: ColorType | Sequence[ColorType]) -> None: ...
+    def get_hatchcolor(self) -> ColorType | Sequence[ColorType]: ...
+    def set_hatchcolor(
+        self, c: ColorType | Sequence[ColorType] | Literal["edge"]
+    ) -> None: ...
     def set_alpha(self, alpha: float | Sequence[float] | None) -> None: ...
     def get_linewidth(self) -> float | Sequence[float]: ...
     def get_linestyle(self) -> LineStyleType | Sequence[LineStyleType]: ...
@@ -106,6 +119,29 @@ class PolyCollection(_CollectionWithSizes):
         self, verts: Sequence[ArrayLike | Path], codes: Sequence[int]
     ) -> None: ...
 
+class FillBetweenPolyCollection(PolyCollection):
+    def __init__(
+        self,
+        t_direction: Literal["x", "y"],
+        t: ArrayLike,
+        f1: ArrayLike,
+        f2: ArrayLike,
+        *,
+        where: Sequence[bool] | None = ...,
+        interpolate: bool = ...,
+        step: Literal["pre", "post", "mid"] | None = ...,
+        **kwargs,
+    ) -> None: ...
+    def set_data(
+        self,
+        t: ArrayLike,
+        f1: ArrayLike,
+        f2: ArrayLike,
+        *,
+        where: Sequence[bool] | None = ...,
+    ) -> None: ...
+    def get_datalim(self, transData: transforms.Transform) -> transforms.Bbox: ...
+
 class RegularPolyCollection(_CollectionWithSizes):
     def __init__(
         self, numsides: int, *, rotation: float = ..., sizes: ArrayLike = ..., **kwargs
@@ -130,7 +166,6 @@ class LineCollection(Collection):
     def get_color(self) -> ColorType | Sequence[ColorType]: ...
     def get_colors(self) -> ColorType | Sequence[ColorType]: ...
     def get_gapcolor(self) -> ColorType | Sequence[ColorType] | None: ...
-
 
 class EventCollection(LineCollection):
     def __init__(
